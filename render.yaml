@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: link-tracker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: "3.11.6"

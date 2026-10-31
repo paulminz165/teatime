@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import os
 import hashlib
+import urllib.request
 
 app = Flask(__name__)
 
@@ -23,6 +24,27 @@ def save_log(entry):
 
 # Admin password (set via environment variable)
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme123")
+
+def get_ip_location(ip):
+    """Lookup IP geolocation using ip-api.com (free, no key needed)."""
+    try:
+        # Take only the first IP if multiple (X-Forwarded-For chain)
+        real_ip = ip.split(",")[0].strip()
+        url = f"http://ip-api.com/json/{real_ip}?fields=status,country,regionName,city,isp,query"
+        req = urllib.request.Request(url, headers={"User-Agent": "LinkTracker/1.0"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get("status") == "success":
+                return {
+                    "city": data.get("city", "Unknown"),
+                    "region": data.get("regionName", ""),
+                    "country": data.get("country", "Unknown"),
+                    "isp": data.get("isp", "Unknown"),
+                    "real_ip": data.get("query", real_ip),
+                }
+    except:
+        pass
+    return {"city": "Unknown", "region": "", "country": "Unknown", "isp": "Unknown", "real_ip": ip.split(",")[0].strip()}
 
 def parse_user_agent(ua):
     """Extract device, OS, and browser from User-Agent string."""
@@ -100,17 +122,23 @@ def track(link_id):
 
     ua = request.headers.get("User-Agent", "")
     device, os_name, browser = parse_user_agent(ua)
+    raw_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    location = get_ip_location(raw_ip)
 
     entry = {
         "link_id": link_id,
         "timestamp": datetime.utcnow().isoformat() + "Z",
-        "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+        "ip": location["real_ip"],
         "user_agent": ua,
         "device": device,
         "os": os_name,
         "browser": browser,
         "referrer": request.headers.get("Referer", "Direct"),
         "language": request.headers.get("Accept-Language", "Unknown"),
+        "city": location["city"],
+        "region": location["region"],
+        "country": location["country"],
+        "isp": location["isp"],
     }
 
     save_log(entry)
@@ -171,6 +199,8 @@ DASHBOARD_HTML = """
         tr:hover { background: #1e293b; }
 
         .tag { background: #334155; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; }
+        .location-tag { background: #1e3a5f; color: #7dd3fc; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; }
+        .isp-tag { background: #1a2e1a; color: #86efac; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; }
 
         .empty { color: #64748b; text-align: center; padding: 40px; }
 
@@ -236,6 +266,8 @@ DASHBOARD_HTML = """
                 <th>Time (UTC)</th>
                 <th>Link</th>
                 <th>IP</th>
+                <th>Location</th>
+                <th>ISP</th>
                 <th>Device</th>
                 <th>OS</th>
                 <th>Browser</th>
@@ -245,6 +277,8 @@ DASHBOARD_HTML = """
                 <td>{{ log.timestamp[:19] }}</td>
                 <td><span class="tag">{{ log.link_id }}</span></td>
                 <td>{{ log.ip }}</td>
+                <td><span class="location-tag">{{ log.get('city', 'N/A') }}{% if log.get('region') %}, {{ log.region }}{% endif %}, {{ log.get('country', '') }}</span></td>
+                <td><span class="isp-tag">{{ log.get('isp', 'N/A') }}</span></td>
                 <td>{{ log.device }}</td>
                 <td>{{ log.os }}</td>
                 <td>{{ log.browser }}</td>
